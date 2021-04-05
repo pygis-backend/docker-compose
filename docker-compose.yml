@@ -1,0 +1,99 @@
+version: "3"
+
+volumes:
+  db-backups:
+  geoserver_data:
+  geodb-data:
+  users_api_data:
+
+services:
+  db:
+    image: kartoza/postgis
+    volumes:
+      - ./resources/sql/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - geodb-data:/var/lib/postgresql
+    ports:
+      - "5431:5432"
+    environment:
+      - POSTGRES_DB=gis,gwc
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASS=manti2468
+      - ALLOW_IP_RANGE=0.0.0.0/0
+    restart: on-failure
+
+  mock_config_server:
+    container_name: mock_config_server
+    build: ./gis_mock_server
+    ports:
+      - "8020:80"
+
+  users_api:
+    container_name: users-api
+    build: ./users-api/src
+    command: uvicorn app.main:app --reload --workers 1 --host 0.0.0.0 --port 8000
+    volumes:
+      - ./users-api/src/:/usr/src/app/
+    ports:
+      - 8030:8000
+    environment:
+      - DATABASE_URL=postgresql://postgres:secret@users_api_db/gis_users
+      - API_KEY=iwhdiodhoiwehwioh
+      - API_KEY_NAME=access_token
+  users_api_db:
+    image: postgres:12.1-alpine
+    volumes:
+      - users_api_data:/var/lib/postgresql/data/
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=secret
+      - POSTGRES_DB=gis_users
+    ports:
+      - 5432:5432
+  oauth_api:
+    build: ./oauth-api/src
+    command: uvicorn app.main:app --reload --workers 1 --host 0.0.0.0 --port 8000
+    volumes:
+      - ./oauth-api/src/:/usr/src/app/
+    environment:
+      - CREDENTIALS_URL=http://users_api:8000/users/credentials
+      - CREDENTIALS_API_KEY=iwhdiodhoiwehwioh
+      - SECRET_JWT_KEY=71e44ea7cc314cf222fcee8403743c5b4056ebc1c9d82b0c95c0c5fc17de89c1
+      - TOKEN_EXPIRATION_MINUTES=30
+    ports:
+      - 8040:8000
+
+  geoserver:
+    image: kartoza/geoserver
+    volumes:
+      - geoserver_data:/opt/geoserver/data_dir
+    ports:
+      - "8080:8080"
+    restart: on-failure
+    environment:
+      - POSTGRES_DB=gis,gwc
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASS=manti2468
+      - ALLOW_IP_RANGE=0.0.0.0/0
+    depends_on:
+      - db
+    healthcheck:
+      test: curl --fail -s http://localhost:8080/ || exit 1
+      interval: 1m30s
+      timeout: 10s
+      retries: 3
+
+  dbbackups:
+    image: kartoza/pg-backup
+    volumes:
+      - db-backups:/backups
+    environment:
+      - DUMPPREFIX=PG_db
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASS=manti2468
+      - POSTGRES_PORT=5432
+      - POSTGRES_HOST=db
+      - POSTGRES_DBNAME=gis
+
+    restart: on-failure
+    depends_on:
+      - db

@@ -20,6 +20,11 @@ docs_build
 venv
 docs.zip
 archive.zip
+custom-layers-api
+geojson-convertor
+oauth-api
+users-api
+api_gateway
 
 # vim temporary files
 *~
