@@ -5,8 +5,34 @@ volumes:
   geoserver_data:
   geodb-data:
   users_api_data:
+  geofiles_data:
 
 services:
+  fluentd:
+    build: ./logs-service/fluentd
+    volumes:
+      - ./logs-service/fluentd/conf:/fluentd/etc
+    links:
+      - "elasticsearch"
+    ports:
+      - "24224:24224"
+      - "24224:24224/udp"
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.10.2
+    environment:
+      - "discovery.type=single-node"
+    expose:
+      - "9200"
+    ports:
+      - "9200:9200"
+
+  kibana:
+    image: kibana:7.10.1
+    links:
+      - "elasticsearch"
+    ports:
+      - "5601:5601"
   db:
     image: kartoza/postgis
     volumes:
@@ -23,11 +49,15 @@ services:
 
   mock_config_server:
     container_name: mock_config_server
+    volumes:
+      - ./gis_mock_server/app/:/usr/src/app/
     build: ./gis_mock_server
     ports:
       - "8020:80"
 
   users_api:
+    depends_on:
+      - fluentd
     container_name: users-api
     build: ./users-api/src
     command: uvicorn app.main:app --reload --workers 1 --host 0.0.0.0 --port 8000
@@ -39,6 +69,11 @@ services:
       - DATABASE_URL=postgresql://postgres:secret@users_api_db/gis_users
       - API_KEY=iwhdiodhoiwehwioh
       - API_KEY_NAME=access_token
+    logging:
+      driver: "fluentd"
+      options:
+        fluentd-address: localhost:24224
+        tag: users_api
   users_api_db:
     image: postgres:12.1-alpine
     volumes:
@@ -50,6 +85,8 @@ services:
     ports:
       - 5432:5432
   oauth_api:
+    depends_on:
+      - fluentd
     build: ./oauth-api/src
     command: uvicorn app.main:app --reload --workers 1 --host 0.0.0.0 --port 8000
     volumes:
@@ -61,6 +98,40 @@ services:
       - TOKEN_EXPIRATION_MINUTES=30
     ports:
       - 8040:8000
+    logging:
+      driver: "fluentd"
+      options:
+        fluentd-address: localhost:24224
+        tag: oauth_api
+  geofiles_api:
+    depends_on:
+      - fluentd
+    container_name: geofiles_api
+    build: ./geofiles-convertor/src
+    command: uvicorn app.main:app --reload --workers 1 --host 0.0.0.0 --port 8000
+    volumes:
+      - ./geofiles-convertor/src:/usr/src/app/
+    environment:
+      - DATABASE_URL=postgresql://postgres:secret@geofiles_db/uploads
+      - CREDENTIALS_URL=http://oauth_api:8000/auth/credentials
+      - FILE_EOL=10
+    ports:
+      - 8050:8000
+    logging:
+      driver: "fluentd"
+      options:
+        fluentd-address: localhost:24224
+        tag: geofiles_api
+  geofiles_db:
+    image: postgres:12.1-alpine
+    volumes:
+      - geofiles_data:/var/lib/postgresql/data/
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=secret
+      - POSTGRES_DB=uploads
+    ports:
+      - 5438:5432
 
   geoserver:
     image: kartoza/geoserver
