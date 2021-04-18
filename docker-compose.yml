@@ -6,6 +6,7 @@ volumes:
   geodb-data:
   users_api_data:
   geofiles_data:
+  users_layers_data:
 
 services:
   fluentd:
@@ -84,13 +85,13 @@ services:
       - POSTGRES_DB=gis_users
     ports:
       - 5432:5432
-  oauth_api:
+  auth_api:
     depends_on:
       - fluentd
-    build: ./oauth-api/src
+    build: ./auth-api/src
     command: uvicorn app.main:app --reload --workers 1 --host 0.0.0.0 --port 8000
     volumes:
-      - ./oauth-api/src/:/usr/src/app/
+      - ./auth-api/src/:/usr/src/app/
     environment:
       - CREDENTIALS_URL=http://users_api:8000/users/credentials
       - CREDENTIALS_API_KEY=iwhdiodhoiwehwioh
@@ -102,18 +103,18 @@ services:
       driver: "fluentd"
       options:
         fluentd-address: localhost:24224
-        tag: oauth_api
+        tag: auth_api
   geofiles_api:
     depends_on:
       - fluentd
     container_name: geofiles_api
-    build: ./geofiles-convertor/src
+    build: ./geofiles-api/src
     command: uvicorn app.main:app --reload --workers 1 --host 0.0.0.0 --port 8000
     volumes:
-      - ./geofiles-convertor/src:/usr/src/app/
+      - ./geofiles-api/src:/usr/src/app/
     environment:
       - DATABASE_URL=postgresql://postgres:secret@geofiles_db/uploads
-      - CREDENTIALS_URL=http://oauth_api:8000/auth/credentials
+      - CREDENTIALS_URL=http://auth_api:8000/auth/credentials
       - FILE_EOL=10
     ports:
       - 8050:8000
@@ -132,6 +133,35 @@ services:
       - POSTGRES_DB=uploads
     ports:
       - 5438:5432
+  users_layers_api:
+    depends_on:
+      - fluentd
+    container_name: users_layers_api
+    build: ./users-layers-api/src
+    command: uvicorn app.main:app --reload --workers 1 --host 0.0.0.0 --port 8000
+    volumes:
+      - ./users-layers-api/src:/usr/src/app/
+    environment:
+      - DATABASE_URL=postgresql://postgres:secret@users_layers_db/custom_layers
+      - CREDENTIALS_URL=http://auth_api:8000/auth/credentials
+      - FILE_EOL=10
+    ports:
+      - 8060:8000
+    logging:
+      driver: "fluentd"
+      options:
+        fluentd-address: localhost:24224
+        tag: users_layers_api
+  users_layers_db:
+    image: postgres:12.1-alpine
+    volumes:
+      - users_layers_data:/var/lib/postgresql/data/
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=secret
+      - POSTGRES_DB=custom_layers
+    ports:
+      - 5440:5432
 
   geoserver:
     image: kartoza/geoserver
