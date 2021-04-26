@@ -10,9 +10,7 @@ volumes:
 
 services:
   fluentd:
-    build: ./logs-service/fluentd
-    volumes:
-      - ./logs-service/fluentd/conf:/fluentd/etc
+    image: nessgis/logs-service
     links:
       - "elasticsearch"
     ports:
@@ -60,16 +58,14 @@ services:
     depends_on:
       - fluentd
     container_name: users-api
-    build: ./users-api/src
+    image: nessgis/users-api
     command: uvicorn app.main:app --reload --workers 1 --host 0.0.0.0 --port 8000
-    volumes:
-      - ./users-api/src/:/usr/src/app/
     ports:
       - 8030:8000
     environment:
       - DATABASE_URL=postgresql://postgres:secret@users_api_db/gis_users
       - API_KEY=iwhdiodhoiwehwioh
-      - API_KEY_NAME=access_token
+      - API_KEY_NAME=apiKey
     logging:
       driver: "fluentd"
       options:
@@ -88,15 +84,14 @@ services:
   auth_api:
     depends_on:
       - fluentd
-    build: ./auth-api/src
+    image: nessgis/auth-api
     command: uvicorn app.main:app --reload --workers 1 --host 0.0.0.0 --port 8000
-    volumes:
-      - ./auth-api/src/:/usr/src/app/
     environment:
       - CREDENTIALS_URL=http://users_api:8000/users/credentials
       - CREDENTIALS_API_KEY=iwhdiodhoiwehwioh
       - SECRET_JWT_KEY=71e44ea7cc314cf222fcee8403743c5b4056ebc1c9d82b0c95c0c5fc17de89c1
       - TOKEN_EXPIRATION_MINUTES=30
+      - ACCESS_TOKEN_KEY=token
     ports:
       - 8040:8000
     logging:
@@ -108,13 +103,14 @@ services:
     depends_on:
       - fluentd
     container_name: geofiles_api
-    build: ./geofiles-api/src
+    image: nessgis/geofiles-api
     command: uvicorn app.main:app --reload --workers 1 --host 0.0.0.0 --port 8000
     volumes:
       - ./geofiles-api/src:/usr/src/app/
     environment:
       - DATABASE_URL=postgresql://postgres:secret@geofiles_db/uploads
       - CREDENTIALS_URL=http://auth_api:8000/auth/credentials
+      - ACCESS_TOKEN_KEY=token
       - FILE_EOL=10
     ports:
       - 8050:8000
@@ -144,6 +140,7 @@ services:
     environment:
       - DATABASE_URL=postgresql://postgres:secret@users_layers_db/custom_layers
       - CREDENTIALS_URL=http://auth_api:8000/auth/credentials
+      - ACCESS_TOKEN_KEY=token
       - FILE_EOL=10
     ports:
       - 8060:8000
@@ -151,50 +148,3 @@ services:
       driver: "fluentd"
       options:
         fluentd-address: localhost:24224
-        tag: users_layers_api
-  users_layers_db:
-    image: postgres:12.1-alpine
-    volumes:
-      - users_layers_data:/var/lib/postgresql/data/
-    environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=secret
-      - POSTGRES_DB=custom_layers
-    ports:
-      - 5440:5432
-
-  geoserver:
-    image: kartoza/geoserver
-    volumes:
-      - geoserver_data:/opt/geoserver/data_dir
-    ports:
-      - "8080:8080"
-    restart: on-failure
-    environment:
-      - POSTGRES_DB=gis,gwc
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASS=manti2468
-      - ALLOW_IP_RANGE=0.0.0.0/0
-    depends_on:
-      - db
-    healthcheck:
-      test: curl --fail -s http://localhost:8080/ || exit 1
-      interval: 1m30s
-      timeout: 10s
-      retries: 3
-
-  dbbackups:
-    image: kartoza/pg-backup
-    volumes:
-      - db-backups:/backups
-    environment:
-      - DUMPPREFIX=PG_db
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASS=manti2468
-      - POSTGRES_PORT=5432
-      - POSTGRES_HOST=db
-      - POSTGRES_DBNAME=gis
-
-    restart: on-failure
-    depends_on:
-      - db
