@@ -32,6 +32,26 @@ services:
       - "elasticsearch"
     ports:
       - "5601:5601"
+  geoserver:
+    image: kartoza/geoserver
+    volumes:
+      - geoserver_data:/opt/geoserver/data_dir
+    ports:
+      - "8080:8080"
+    restart: on-failure
+    environment:
+      - POSTGRES_DB=gis,gwc
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASS=manti2468
+      - ALLOW_IP_RANGE=0.0.0.0/0
+    depends_on:
+      - db
+    healthcheck:
+      test: curl --fail -s http://localhost:8080/ || exit 1
+      interval: 1m30s
+      timeout: 10s
+      retries: 3
+
   db:
     image: kartoza/postgis
     volumes:
@@ -45,6 +65,11 @@ services:
       - POSTGRES_PASS=manti2468
       - ALLOW_IP_RANGE=0.0.0.0/0
     restart: on-failure
+
+  mdapi:
+    image: nessgis/gis_api
+    ports:
+      - "5001:5001"
 
   mock_config_server:
     container_name: mock_config_server
@@ -80,7 +105,7 @@ services:
       - POSTGRES_PASSWORD=secret
       - POSTGRES_DB=gis_users
     ports:
-      - 5432:5432
+      - 6432:5432
   auth_api:
     depends_on:
       - fluentd
@@ -111,6 +136,8 @@ services:
       - DATABASE_URL=postgresql://postgres:secret@geofiles_db/uploads
       - CREDENTIALS_URL=http://auth_api:8000/auth/credentials
       - ACCESS_TOKEN_KEY=token
+      - REQUEST_ID_KEY=X-Request-ID
+      - REQUEST_TIME_KEY=X-Process-Time
       - FILE_EOL=10
     ports:
       - 8050:8000
@@ -128,12 +155,16 @@ services:
       - POSTGRES_PASSWORD=secret
       - POSTGRES_DB=uploads
     ports:
-      - 5438:5432
+      - 6438:5432
+  gis-front:
+    image: nessgis/gis-front
+    ports:
+      - 3002:3000
   users_layers_api:
     depends_on:
       - fluentd
     container_name: users_layers_api
-    build: ./users-layers-api/src
+    image: nessgis/users-layers-api
     command: uvicorn app.main:app --reload --workers 1 --host 0.0.0.0 --port 8000
     volumes:
       - ./users-layers-api/src:/usr/src/app/
@@ -141,6 +172,8 @@ services:
       - DATABASE_URL=postgresql://postgres:secret@users_layers_db/custom_layers
       - CREDENTIALS_URL=http://auth_api:8000/auth/credentials
       - ACCESS_TOKEN_KEY=token
+      - REQUEST_ID_KEY=X-Request-ID
+      - REQUEST_TIME_KEY=X-Process-Time
       - FILE_EOL=10
     ports:
       - 8060:8000
@@ -148,3 +181,14 @@ services:
       driver: "fluentd"
       options:
         fluentd-address: localhost:24224
+
+  users_layers_db:
+    image: postgres:12.1-alpine
+    volumes:
+      - users_layers_data:/var/lib/postgresql/data/
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=secret
+      - POSTGRES_DB=uploads
+    ports:
+      - 6439:5432
